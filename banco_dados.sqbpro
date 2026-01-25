@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?><sqlb_project><db path="banco_dados.db" readonly="0" foreign_keys="1" case_sensitive_like="0" temp_store="0" wal_autocheckpoint="1000" synchronous="2"/><attached/><window><main_tabs open="structure browser pragmas query" current="0"/></window><tab_structure><column_width id="0" width="300"/><column_width id="1" width="0"/><column_width id="2" width="100"/><column_width id="3" width="1922"/><column_width id="4" width="0"/><expanded_item id="0" parent="1"/><expanded_item id="1" parent="1"/><expanded_item id="2" parent="1"/><expanded_item id="3" parent="1"/></tab_structure><tab_browse><table title="Clientes" custom_title="0" dock_id="1" table="4,8:mainClientes"/><dock_state state="000000ff00000000fd0000000100000002000005ab00000390fc0100000001fb000000160064006f0063006b00420072006f00770073006500310100000000000005ab0000012400ffffff0000026f0000000000000004000000040000000800000008fc00000000"/><default_encoding codec=""/><browse_table_settings><table schema="main" name="Clientes" show_row_id="0" encoding="" plot_x_axis="" unlock_view_pk="_rowid_" freeze_columns="0"><sort/><column_widths><column index="1" value="35"/><column index="2" value="55"/><column index="3" value="55"/><column index="4" value="151"/></column_widths><filter_values/><conditional_formats/><row_id_formats/><display_formats/><hidden_columns/><plot_y_axes/><global_filter/></table></browse_table_settings></tab_browse><tab_sql><sql name="SQL 1*">-- Criando a tabela de Produtos
+CREATE TABLE IF NOT EXISTS Produtos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nome TEXT NOT NULL,
+    preco REAL NOT NULL,
+    tamanho TEXT
+);
+
+-- Criando a tabela de Pedidos
+CREATE TABLE IF NOT EXISTS Pedidos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    data TEXT NOT NULL,
+    id_cliente INTEGER NOT NULL,
+    valor_total REAL NOT NULL,
+    FOREIGN KEY (id_cliente) REFERENCES Clientes (id)
+);
+
+-- Criando a tabela de Itens do Pedido (onde o bolo é ligado ao pedido)
+CREATE TABLE IF NOT EXISTS Pedidos_Itens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id_pedido INTEGER NOT NULL,
+    id_produto INTEGER NOT NULL,
+    valor_unitario REAL NOT NULL,
+    quantidade INTEGER NOT NULL,
+    total REAL NOT NULL,
+    FOREIGN KEY (id_pedido) REFERENCES Pedidos (id),
+    FOREIGN KEY (id_produto) REFERENCES Produtos (id)
+);</sql><current_tab id="0"/></tab_sql></sqlb_project>
