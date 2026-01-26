@@ -88,7 +88,7 @@ if pagina == "📊 Dashboard & Relatórios":
         if df.empty:
             st.warning(f"Nenhuma venda encontrada no período: {filtro_periodo}")
         else:
-            # 3. Criar DF Único para Financeiro
+            # 3. Preparar Dados
             df_vendas_unicas = df.drop_duplicates(subset=['id_pedido'])
             
             # KPIs
@@ -103,22 +103,35 @@ if pagina == "📊 Dashboard & Relatórios":
 
             st.divider()
 
-            # 4. GRÁFICOS
+            # 4. GRÁFICOS PERSONALIZADOS
             col_g1, col_g2 = st.columns(2)
             
             with col_g1:
                 st.subheader("💳 Formas de Pagamento")
+                
+                # --- AQUI DEFINIMOS AS CORES ---
+                cores_personalizadas = {
+                    "Pix": "#00C1AF",              # Verde Água (Lembra o logo do Pix)
+                    "Dinheiro": "#2E7D32",         # Verde Escuro (Cédula)
+                    "Cartão de Crédito": "#1565C0", # Azul
+                    "Cartão de Débito": "#EF6C00"   # Laranja
+                }
+                
                 df_pag = df_vendas_unicas.groupby("pagamento")["valor_total"].sum().reset_index()
                 fig_pag = px.pie(df_pag, values='valor_total', names='pagamento', 
                                  title="Receita por Tipo",
-                                 color_discrete_sequence=px.colors.sequential.RdBu)
+                                 color='pagamento', # Avisa que vamos usar a coluna pagamento para colorir
+                                 color_discrete_map=cores_personalizadas) # Aplica as cores
+                
                 st.plotly_chart(fig_pag, use_container_width=True)
 
             with col_g2:
                 st.subheader("🏆 Bolos Mais Vendidos")
                 df_prod = df.groupby("produto")["quantidade"].sum().reset_index().sort_values("quantidade", ascending=True)
+                # Adicionei uma cor única (Marrom Chocolate) para os bolos
                 fig_prod = px.bar(df_prod, x="quantidade", y="produto", orientation='h',
-                                  title="Top Produtos (Qtd)", text="quantidade")
+                                  title="Top Produtos (Qtd)", text="quantidade",
+                                  color_discrete_sequence=['#8D6E63']) 
                 st.plotly_chart(fig_prod, use_container_width=True)
 
             st.subheader("📅 Evolução Diária")
@@ -126,13 +139,28 @@ if pagina == "📊 Dashboard & Relatórios":
             fig_line = px.line(df_dia, x="dia", y="valor_total", markers=True, title="Faturamento por Dia")
             st.plotly_chart(fig_line, use_container_width=True)
 
-            with st.expander("🔎 Ver Tabela Detalhada"):
-                st.dataframe(df_vendas_unicas[['data', 'valor_total', 'pagamento']], use_container_width=True)
+            # --- BOTÃO DE DOWNLOAD (NOVO!) ---
+            st.divider()
+            st.subheader("📂 Exportar Dados")
+            
+            # Converter o DataFrame para CSV
+            csv = df.to_csv(index=False).encode('utf-8')
+            
+            st.download_button(
+                label="📥 Baixar Relatório em Excel (.csv)",
+                data=csv,
+                file_name='relatorio_vendas.csv',
+                mime='text/csv',
+                help="Clique para baixar uma planilha com todas as vendas listadas acima."
+            )
+
+            with st.expander("🔎 Ver Tabela na Tela"):
+                st.dataframe(df, use_container_width=True)
     else:
         st.info("Nenhuma venda registrada no sistema ainda.")
 
 # =================================================================================
-# PÁGINA: NOVA VENDA (COM CHECKOUT VISUAL IGUAL À FOTO)
+# PÁGINA: NOVA VENDA
 # =================================================================================
 elif pagina == "🛒 Nova Venda":
     st.header("🛒 Registrar Pedido")
@@ -165,17 +193,14 @@ elif pagina == "🛒 Nova Venda":
                     "qtd": qtd, "total": dados_p['preco']*qtd
                 })
 
-        # --- AQUI ESTÁ A MÁGICA: SÓ MOSTRA SE TIVER ITENS ---
         if st.session_state['carrinho']:
             df_c = pd.DataFrame(st.session_state['carrinho'])
             st.dataframe(df_c[['nome', 'qtd', 'preco', 'total']], hide_index=True, use_container_width=True)
             total = df_c['total'].sum()
             st.write(f"### Total a Pagar: R$ {total:.2f}")
             
-            # Restaurei o texto EXATO da sua imagem:
             pagamento = st.radio("Como o cliente pagou?", ["Pix", "Dinheiro", "Cartão de Crédito", "Cartão de Débito"], horizontal=True)
             
-            # Restaurei o botão EXATO da sua imagem:
             if st.button("✅ FECHAR CAIXA", type="primary"):
                 conn = conectar()
                 c = conn.cursor()
