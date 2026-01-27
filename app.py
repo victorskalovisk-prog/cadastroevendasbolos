@@ -10,7 +10,7 @@ st.set_page_config(page_title="Nossa Que Bolo! 🎂", page_icon="🎂", layout="
 
 # --- CONEXÃO COM O BANCO LOCAL ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, "banco_dados.db")
+DB_PATH = os.path.join(BASE_DIR, "sistema_bolos_v2.db")
 
 def conectar():
     return sqlite3.connect(DB_PATH)
