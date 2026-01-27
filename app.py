@@ -71,10 +71,12 @@ if pagina == "📊 Dashboard":
     conn.close()
 
     if not df.empty:
+        # Converter para data para poder filtrar
         df['data_venda'] = pd.to_datetime(df['data_venda'])
         df['dia'] = df['data_venda'].dt.date  
         data_atual = datetime.now()
 
+        # Filtros
         if filtro_periodo == "Últimos 7 dias":
             data_corte = data_atual - timedelta(days=7)
             df = df[df['data_venda'] >= data_corte]
@@ -104,17 +106,36 @@ if pagina == "📊 Dashboard":
                 fig2 = px.bar(df.groupby("produto")["quantidade"].sum().reset_index().sort_values("quantidade"), x="quantidade", y="produto", orientation='h', color_discrete_sequence=['#8D6E63'])
                 st.plotly_chart(fig2, use_container_width=True)
             
-            # --- BOTÃO DE DOWNLOAD MELHORADO 🇧🇷 ---
+            # --- PREPARAÇÃO PARA O EXCEL (AJUSTE FINO) ---
             st.divider()
             st.subheader("📂 Exportar Dados")
-            
-            # Aqui está o segredo: sep=';' e decimal=',' para o Excel Brasileiro entender
-            csv = df.to_csv(index=False, sep=';', decimal=',').encode('utf-8-sig')
+
+            # 1. Criamos uma cópia para não bagunçar os gráficos
+            df_export = df.copy()
+
+            # 2. Renomear as colunas como você pediu
+            df_export = df_export.rename(columns={
+                'id_pedido': 'Pedido',
+                'data_venda': 'Data da Venda',
+                'data_entrega': 'Data da Entrega'
+                # valor_total, produto, pagamento e observacoes ficam iguais
+            })
+
+            # 3. Formatar as Datas para ficarem bonitas (Dia/Mês/Ano)
+            df_export['Data da Venda'] = df_export['Data da Venda'].dt.strftime('%d/%m/%Y')
+            df_export['Data da Entrega'] = pd.to_datetime(df_export['Data da Entrega']).dt.strftime('%d/%m/%Y')
+
+            # 4. Selecionar a ordem das colunas para ficar organizado
+            colunas_finais = ['Pedido', 'Data da Venda', 'Data da Entrega', 'produto', 'quantidade', 'valor_total', 'pagamento', 'observacoes']
+            df_export = df_export[colunas_finais]
+
+            # 5. Gerar o CSV
+            csv = df_export.to_csv(index=False, sep=';', decimal=',').encode('utf-8-sig')
             
             st.download_button(
                 label="📥 Baixar Planilha (Excel BR)", 
                 data=csv, 
-                file_name=f"relatorio_vendas_{date.today()}.csv", 
+                file_name=f"relatorio_bolos_{date.today()}.csv", 
                 mime="text/csv"
             )
 
