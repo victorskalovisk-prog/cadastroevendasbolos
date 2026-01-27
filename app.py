@@ -3,7 +3,7 @@ import sqlite3
 import pandas as pd
 import plotly.express as px
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Nossa Que Bolo! 🎂", page_icon="🎂", layout="wide")
@@ -20,12 +20,12 @@ def criar_tabelas():
     c = conn.cursor()
     c.execute("""CREATE TABLE IF NOT EXISTS Clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT, telefone TEXT, endereco TEXT)""")
     c.execute("""CREATE TABLE IF NOT EXISTS Produtos (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT, preco REAL, tamanho TEXT)""")
-    c.execute("""CREATE TABLE IF NOT EXISTS Pedidos (id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT, id_cliente INTEGER, valor_total REAL, pagamento TEXT)""")
+    # ADICIONEI: data_entrega e observacoes
+    c.execute("""CREATE TABLE IF NOT EXISTS Pedidos (id INTEGER PRIMARY KEY AUTOINCREMENT, data_venda TEXT, data_entrega TEXT, id_cliente INTEGER, valor_total REAL, pagamento TEXT, observacoes TEXT)""")
     c.execute("""CREATE TABLE IF NOT EXISTS Pedidos_Itens (id INTEGER PRIMARY KEY AUTOINCREMENT, id_pedido INTEGER, id_produto INTEGER, valor_unitario REAL, quantidade INTEGER, total REAL)""")
     conn.commit()
     conn.close()
 
-# Garante que as tabelas existem ao iniciar
 criar_tabelas()
 
 def carregar_dados(tabela):
@@ -34,28 +34,28 @@ def carregar_dados(tabela):
     conn.close()
     return df
 
-# --- BARRA LATERAL (MENU + FILTROS) ---
+# --- BARRA LATERAL ---
 st.sidebar.title("🎂 Gestão Completa")
-pagina = st.sidebar.radio("Navegação:", ["📊 Dashboard & Relatórios", "🛒 Nova Venda", "👥 Clientes", "🍰 Cardápio"])
+pagina = st.sidebar.radio("Navegação:", ["📊 Dashboard", "🛒 Nova Encomenda", "📂 Histórico & Produção", "👥 Clientes", "🍰 Cardápio"])
 
 st.sidebar.markdown("---")
-if pagina == "📊 Dashboard & Relatórios":
-    st.sidebar.header("🗓️ Filtros do Relatório")
-    filtro_periodo = st.sidebar.selectbox("Selecione o Período:", ["Todo o Histórico", "Últimos 7 dias", "Últimos 30 dias", "Hoje"])
+if pagina == "📊 Dashboard":
+    st.sidebar.header("🗓️ Filtros")
+    filtro_periodo = st.sidebar.selectbox("Período:", ["Todo o Histórico", "Últimos 7 dias", "Hoje"])
 else:
     filtro_periodo = "Todo o Histórico"
 
 # =================================================================================
-# PÁGINA: DASHBOARD COMPLETO
+# PÁGINA: DASHBOARD
 # =================================================================================
-if pagina == "📊 Dashboard & Relatórios":
+if pagina == "📊 Dashboard":
     st.header("📊 Painel de Controle")
 
     conn = conectar()
     sql = """
     SELECT 
         Pedidos.id as id_pedido,
-        Pedidos.data,
+        Pedidos.data_venda as data,
         Pedidos.valor_total,
         Pedidos.pagamento,
         Pedidos_Itens.quantidade,
@@ -63,107 +63,57 @@ if pagina == "📊 Dashboard & Relatórios":
     FROM Pedidos_Itens
     JOIN Pedidos ON Pedidos_Itens.id_pedido = Pedidos.id
     JOIN Produtos ON Pedidos_Itens.id_produto = Produtos.id
-    ORDER BY Pedidos.data DESC
+    ORDER BY Pedidos.data_venda DESC
     """
     df = pd.read_sql_query(sql, conn)
     conn.close()
 
     if not df.empty:
-        # 1. Tratamento de Datas
         df['data'] = pd.to_datetime(df['data'])
         df['dia'] = df['data'].dt.date  
-        
         data_atual = datetime.now()
 
-        # 2. Aplicar Filtros
         if filtro_periodo == "Últimos 7 dias":
             data_corte = data_atual - timedelta(days=7)
-            df = df[df['data'] >= data_corte]
-        elif filtro_periodo == "Últimos 30 dias":
-            data_corte = data_atual - timedelta(days=30)
             df = df[df['data'] >= data_corte]
         elif filtro_periodo == "Hoje":
             df = df[df['dia'] == data_atual.date()]
 
         if df.empty:
-            st.warning(f"Nenhuma venda encontrada no período: {filtro_periodo}")
+            st.warning("Sem dados neste período.")
         else:
-            # 3. Preparar Dados
             df_vendas_unicas = df.drop_duplicates(subset=['id_pedido'])
-            
-            # KPIs
             faturamento = df_vendas_unicas['valor_total'].sum()
             qtd_pedidos = df_vendas_unicas['id_pedido'].count()
-            ticket_medio = faturamento / qtd_pedidos if qtd_pedidos > 0 else 0
 
-            c1, c2, c3 = st.columns(3)
+            c1, c2 = st.columns(2)
             c1.metric("💰 Faturamento", f"R$ {faturamento:.2f}")
-            c2.metric("📦 Pedidos", qtd_pedidos)
-            c3.metric("📈 Ticket Médio", f"R$ {ticket_medio:.2f}")
-
+            c2.metric("📦 Pedidos Feitos", qtd_pedidos)
             st.divider()
 
-            # 4. GRÁFICOS PERSONALIZADOS
-            col_g1, col_g2 = st.columns(2)
+            col1, col2 = st.columns(2)
+            with col1:
+                st.subheader("Formas de Pagamento")
+                cores = {"Pix": "#00C1AF", "Dinheiro": "#2E7D32", "Cartão de Crédito": "#1565C0", "Cartão de Débito": "#EF6C00"}
+                fig = px.pie(df_vendas_unicas, values='valor_total', names='pagamento', color='pagamento', color_discrete_map=cores)
+                st.plotly_chart(fig, use_container_width=True)
+            with col2:
+                st.subheader("Mais Vendidos")
+                fig2 = px.bar(df.groupby("produto")["quantidade"].sum().reset_index().sort_values("quantidade"), x="quantidade", y="produto", orientation='h', color_discrete_sequence=['#8D6E63'])
+                st.plotly_chart(fig2, use_container_width=True)
             
-            with col_g1:
-                st.subheader("💳 Formas de Pagamento")
-                
-                # --- AQUI DEFINIMOS AS CORES ---
-                cores_personalizadas = {
-                    "Pix": "#00C1AF",              # Verde Água (Lembra o logo do Pix)
-                    "Dinheiro": "#2E7D32",         # Verde Escuro (Cédula)
-                    "Cartão de Crédito": "#1565C0", # Azul
-                    "Cartão de Débito": "#EF6C00"   # Laranja
-                }
-                
-                df_pag = df_vendas_unicas.groupby("pagamento")["valor_total"].sum().reset_index()
-                fig_pag = px.pie(df_pag, values='valor_total', names='pagamento', 
-                                 title="Receita por Tipo",
-                                 color='pagamento', # Avisa que vamos usar a coluna pagamento para colorir
-                                 color_discrete_map=cores_personalizadas) # Aplica as cores
-                
-                st.plotly_chart(fig_pag, use_container_width=True)
-
-            with col_g2:
-                st.subheader("🏆 Bolos Mais Vendidos")
-                df_prod = df.groupby("produto")["quantidade"].sum().reset_index().sort_values("quantidade", ascending=True)
-                # Adicionei uma cor única (Marrom Chocolate) para os bolos
-                fig_prod = px.bar(df_prod, x="quantidade", y="produto", orientation='h',
-                                  title="Top Produtos (Qtd)", text="quantidade",
-                                  color_discrete_sequence=['#8D6E63']) 
-                st.plotly_chart(fig_prod, use_container_width=True)
-
-            st.subheader("📅 Evolução Diária")
-            df_dia = df_vendas_unicas.groupby("dia")["valor_total"].sum().reset_index()
-            fig_line = px.line(df_dia, x="dia", y="valor_total", markers=True, title="Faturamento por Dia")
-            st.plotly_chart(fig_line, use_container_width=True)
-
-            # --- BOTÃO DE DOWNLOAD (NOVO!) ---
-            st.divider()
-            st.subheader("📂 Exportar Dados")
-            
-            # Converter o DataFrame para CSV
+            # Botão Download
             csv = df.to_csv(index=False).encode('utf-8')
-            
-            st.download_button(
-                label="📥 Baixar Relatório em Excel (.csv)",
-                data=csv,
-                file_name='relatorio_vendas.csv',
-                mime='text/csv',
-                help="Clique para baixar uma planilha com todas as vendas listadas acima."
-            )
+            st.download_button("📥 Baixar Excel", csv, "vendas.csv", "text/csv")
 
-            with st.expander("🔎 Ver Tabela na Tela"):
-                st.dataframe(df, use_container_width=True)
     else:
-        st.info("Nenhuma venda registrada no sistema ainda.")
+        st.info("Nenhuma venda registrada.")
 
 # =================================================================================
-# PÁGINA: NOVA VENDA
+# PÁGINA: NOVA ENCOMENDA (COM DATA E OBS)
 # =================================================================================
-elif pagina == "🛒 Nova Venda":
-    st.header("🛒 Registrar Pedido")
+elif pagina == "🛒 Nova Encomenda":
+    st.header("🛒 Registrar Pedido / Encomenda")
     if 'carrinho' not in st.session_state: st.session_state['carrinho'] = []
 
     conn = conectar()
@@ -172,13 +122,22 @@ elif pagina == "🛒 Nova Venda":
     conn.close()
 
     if clientes.empty or produtos.empty:
-        st.warning("Cadastre clientes e produtos antes de vender.")
+        st.warning("Cadastre clientes e produtos primeiro.")
     else:
-        cli_map = dict(zip(clientes['nome'], clientes['id']))
-        nome_c = st.selectbox("Cliente:", list(cli_map.keys()))
+        # 1. Dados do Cliente e Entrega
+        c1, c2 = st.columns([2, 1])
+        with c1:
+            cli_map = dict(zip(clientes['nome'], clientes['id']))
+            nome_c = st.selectbox("Cliente:", list(cli_map.keys()))
+        with c2:
+            data_entrega = st.date_input("📅 Data da Entrega/Retirada", min_value=date.today())
+
+        # Campo de Observações (NOVO)
+        obs = st.text_area("📝 Observações do Bolo (Ex: Escrever 'Parabéns', Recheio Extra, etc):")
         
         st.divider()
         
+        # 2. Produtos
         prod_map = {f"{r['nome']} (R$ {r['preco']:.2f})": r for i, r in produtos.iterrows()}
         c1, c2, c3 = st.columns([3,1,1])
         with c1: 
@@ -188,35 +147,73 @@ elif pagina == "🛒 Nova Venda":
         with c3:
             st.write(""); st.write("")
             if st.button("➕ Add"):
-                st.session_state['carrinho'].append({
-                    "id": dados_p['id'], "nome": dados_p['nome'], "preco": dados_p['preco'],
-                    "qtd": qtd, "total": dados_p['preco']*qtd
-                })
+                st.session_state['carrinho'].append({"id": dados_p['id'], "nome": dados_p['nome'], "preco": dados_p['preco'], "qtd": qtd, "total": dados_p['preco']*qtd})
 
+        # 3. Fechamento
         if st.session_state['carrinho']:
             df_c = pd.DataFrame(st.session_state['carrinho'])
             st.dataframe(df_c[['nome', 'qtd', 'preco', 'total']], hide_index=True, use_container_width=True)
             total = df_c['total'].sum()
-            st.write(f"### Total a Pagar: R$ {total:.2f}")
+            st.write(f"### Total: R$ {total:.2f}")
             
-            pagamento = st.radio("Como o cliente pagou?", ["Pix", "Dinheiro", "Cartão de Crédito", "Cartão de Débito"], horizontal=True)
+            pagamento = st.radio("Pagamento:", ["Pix", "Dinheiro", "Cartão de Crédito", "Cartão de Débito"], horizontal=True)
             
-            if st.button("✅ FECHAR CAIXA", type="primary"):
+            if st.button("✅ CONFIRMAR ENCOMENDA", type="primary"):
                 conn = conectar()
                 c = conn.cursor()
-                data_h = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                c.execute("INSERT INTO Pedidos (data, id_cliente, valor_total, pagamento) VALUES (?,?,?,?)", 
-                          (data_h, cli_map[nome_c], total, pagamento))
+                data_venda = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                # Convertendo data de entrega para string
+                data_entrega_str = data_entrega.strftime("%Y-%m-%d")
+                
+                c.execute("""
+                    INSERT INTO Pedidos (data_venda, data_entrega, id_cliente, valor_total, pagamento, observacoes) 
+                    VALUES (?,?,?,?,?,?)""", 
+                    (data_venda, data_entrega_str, cli_map[nome_c], total, pagamento, obs))
+                
                 id_ped = c.lastrowid
                 for item in st.session_state['carrinho']:
                     c.execute("INSERT INTO Pedidos_Itens (id_pedido, id_produto, valor_unitario, quantidade, total) VALUES (?,?,?,?,?)",
                               (id_ped, item['id'], item['preco'], item['qtd'], item['total']))
                 conn.commit(); conn.close()
                 st.session_state['carrinho'] = []
-                st.balloons(); st.success("Venda Realizada!"); st.rerun()
+                st.balloons(); st.success("Encomenda Agendada!"); st.rerun()
 
 # =================================================================================
-# PÁGINAS DE CADASTRO
+# PÁGINA: HISTÓRICO (COM DETALHES DE ENTREGA)
+# =================================================================================
+elif pagina == "📂 Histórico & Produção":
+    st.header("📂 Histórico de Pedidos")
+    
+    conn = conectar()
+    df = pd.read_sql_query("""
+        SELECT id, data_entrega as 'Para Entregar Em', observacoes as 'Detalhes', valor_total, pagamento 
+        FROM Pedidos ORDER BY data_entrega DESC
+    """, conn)
+    conn.close()
+
+    if not df.empty:
+        # Formata a data para ficar bonitinha (Dia/Mês/Ano)
+        df['Para Entregar Em'] = pd.to_datetime(df['Para Entregar Em']).dt.strftime('%d/%m/%Y')
+        
+        st.dataframe(df, use_container_width=True, hide_index=True)
+        
+        st.divider()
+        st.subheader("🗑️ Cancelar Pedido")
+        # Lógica de exclusão mantida
+        lista = df.apply(lambda x: f"Pedido #{x['id']} - Entrega: {x['Para Entregar Em']} (R$ {x['valor_total']:.2f})", axis=1)
+        sel = st.selectbox("Selecione:", lista)
+        if st.button("Excluir Pedido"):
+            id_del = sel.split("#")[1].split(" -")[0]
+            conn = conectar(); c = conn.cursor()
+            c.execute("DELETE FROM Pedidos_Itens WHERE id_pedido = ?", (id_del,))
+            c.execute("DELETE FROM Pedidos WHERE id = ?", (id_del,))
+            conn.commit(); conn.close()
+            st.success("Cancelado!"); st.rerun()
+    else:
+        st.info("Sem pedidos.")
+
+# =================================================================================
+# PÁGINAS DE CADASTRO (MANTIDAS)
 # =================================================================================
 elif pagina == "👥 Clientes":
     st.header("Clientes")
