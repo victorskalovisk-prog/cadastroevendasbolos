@@ -10,7 +10,6 @@ st.set_page_config(page_title="Nossa Que Bolo! 🎂", page_icon="🎂", layout="
 
 # --- CONEXÃO COM O BANCO LOCAL ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# Mantemos o V2 para não perder seus dados
 DB_PATH = os.path.join(BASE_DIR, "sistema_bolos_v2.db")
 
 def conectar():
@@ -23,6 +22,13 @@ def criar_tabelas():
     c.execute("""CREATE TABLE IF NOT EXISTS Produtos (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT, preco REAL, tamanho TEXT)""")
     c.execute("""CREATE TABLE IF NOT EXISTS Pedidos (id INTEGER PRIMARY KEY AUTOINCREMENT, data_venda TEXT, data_entrega TEXT, id_cliente INTEGER, valor_total REAL, pagamento TEXT, observacoes TEXT)""")
     c.execute("""CREATE TABLE IF NOT EXISTS Pedidos_Itens (id INTEGER PRIMARY KEY AUTOINCREMENT, id_pedido INTEGER, id_produto INTEGER, valor_unitario REAL, quantidade INTEGER, total REAL)""")
+    
+    # Tenta adicionar a coluna STATUS caso ela não exista (para não dar erro no v2)
+    try:
+        c.execute("ALTER TABLE Pedidos ADD COLUMN status TEXT DEFAULT 'Pendente'")
+    except:
+        pass
+        
     conn.commit()
     conn.close()
 
@@ -34,286 +40,159 @@ def carregar_dados(tabela):
     conn.close()
     return df
 
-# --- BARRA LATERAL ---
-st.sidebar.title("🎂 Gestão Completa")
-pagina = st.sidebar.radio("Navegação:", ["📊 Dashboard", "🛒 Nova Encomenda", "📂 Histórico & Comprovante", "👥 Clientes", "🍰 Cardápio"])
+# --- BARRA LATERAL (LOGO + MENU) ---
+try:
+    st.sidebar.image("logo.png", use_container_width=True)
+except:
+    st.sidebar.markdown("# 🎂 Nossa Que Bolo!")
 
-st.sidebar.markdown("---")
-if pagina == "📊 Dashboard":
-    st.sidebar.header("🗓️ Filtros")
-    filtro_periodo = st.sidebar.selectbox("Período:", ["Todo o Histórico", "Últimos 7 dias", "Hoje"])
-else:
-    filtro_periodo = "Todo o Histórico"
-
-
+pagina = st.sidebar.radio("Navegação:", ["📊 Dashboard", "🛒 Nova Encomenda", "👨‍🍳 Produção & Histórico", "👥 Clientes", "🍰 Cardápio"])
 
 # =================================================================================
 # PÁGINA: DASHBOARD
 # =================================================================================
 if pagina == "📊 Dashboard":
     st.header("📊 Painel de Controle")
-
     conn = conectar()
-    sql = """
-    SELECT 
-        Pedidos.id as id_pedido,
-        Pedidos.data_venda as data_venda,
-        Pedidos.data_entrega as data_entrega,
-        Pedidos.valor_total,
-        Pedidos.pagamento,
-        Pedidos_Itens.quantidade,
-        Produtos.nome as produto,
-        Pedidos.observacoes
-    FROM Pedidos_Itens
-    JOIN Pedidos ON Pedidos_Itens.id_pedido = Pedidos.id
-    JOIN Produtos ON Pedidos_Itens.id_produto = Produtos.id
-    ORDER BY Pedidos.data_venda DESC
-    """
+    sql = "SELECT Pedidos.id, Pedidos.data_venda, Pedidos.valor_total, Pedidos.pagamento, Pedidos_Itens.quantidade, Produtos.nome as produto FROM Pedidos_Itens JOIN Pedidos ON Pedidos_Itens.id_pedido = Pedidos.id JOIN Produtos ON Pedidos_Itens.id_produto = Produtos.id"
     df = pd.read_sql_query(sql, conn)
     conn.close()
 
     if not df.empty:
-        # Converter para data para poder filtrar
-        df['data_venda'] = pd.to_datetime(df['data_venda'])
-        df['dia'] = df['data_venda'].dt.date  
-        data_atual = datetime.now()
-
-        # Filtros
-        if filtro_periodo == "Últimos 7 dias":
-            data_corte = data_atual - timedelta(days=7)
-            df = df[df['data_venda'] >= data_corte]
-        elif filtro_periodo == "Hoje":
-            df = df[df['dia'] == data_atual.date()]
-
-        if df.empty:
-            st.warning("Sem dados neste período.")
-        else:
-            df_vendas_unicas = df.drop_duplicates(subset=['id_pedido'])
-            faturamento = df_vendas_unicas['valor_total'].sum()
-            qtd_pedidos = df_vendas_unicas['id_pedido'].count()
-
-            c1, c2 = st.columns(2)
-            c1.metric("💰 Faturamento", f"R$ {faturamento:.2f}")
-            c2.metric("📦 Pedidos Feitos", qtd_pedidos)
-            st.divider()
-
-            col1, col2 = st.columns(2)
-            with col1:
-                st.subheader("Formas de Pagamento")
-                cores = {"Pix": "#00C1AF", "Dinheiro": "#2E7D32", "Cartão de Crédito": "#1565C0", "Cartão de Débito": "#EF6C00"}
-                fig = px.pie(df_vendas_unicas, values='valor_total', names='pagamento', color='pagamento', color_discrete_map=cores)
-                st.plotly_chart(fig, use_container_width=True)
-            with col2:
-                st.subheader("Mais Vendidos")
-                fig2 = px.bar(df.groupby("produto")["quantidade"].sum().reset_index().sort_values("quantidade"), x="quantidade", y="produto", orientation='h', color_discrete_sequence=['#8D6E63'])
-                st.plotly_chart(fig2, use_container_width=True)
-            
-            # --- PREPARAÇÃO PARA O EXCEL (AJUSTE FINO) ---
-            st.divider()
-            st.subheader("📂 Exportar Dados")
-
-            # 1. Criamos uma cópia para não bagunçar os gráficos
-            df_export = df.copy()
-
-            # 2. Renomear as colunas como você pediu
-            df_export = df_export.rename(columns={
-                'id_pedido': 'Pedido',
-                'data_venda': 'Data da Venda',
-                'data_entrega': 'Data da Entrega'
-                # valor_total, produto, pagamento e observacoes ficam iguais
-            })
-
-            # 3. Formatar as Datas para ficarem bonitas (Dia/Mês/Ano)
-            df_export['Data da Venda'] = df_export['Data da Venda'].dt.strftime('%d/%m/%Y')
-            df_export['Data da Entrega'] = pd.to_datetime(df_export['Data da Entrega']).dt.strftime('%d/%m/%Y')
-
-            # 4. Selecionar a ordem das colunas para ficar organizado
-            colunas_finais = ['Pedido', 'Data da Venda', 'Data da Entrega', 'produto', 'quantidade', 'valor_total', 'pagamento', 'observacoes']
-            df_export = df_export[colunas_finais]
-
-            # 5. Gerar o CSV
-            csv = df_export.to_csv(index=False, sep=';', decimal=',').encode('utf-8-sig')
-            
-            st.download_button(
-                label="📥 Baixar Planilha (Excel BR)", 
-                data=csv, 
-                file_name=f"relatorio_bolos_{date.today()}.csv", 
-                mime="text/csv"
-            )
-
+        df_vendas = df.drop_duplicates(subset=['id'])
+        c1, c2 = st.columns(2)
+        c1.metric("💰 Faturamento Total", f"R$ {df_vendas['valor_total'].sum():.2f}")
+        c2.metric("📦 Pedidos Totais", len(df_vendas))
+        
+        st.divider()
+        col1, col2 = st.columns(2)
+        with col1:
+            fig = px.pie(df_vendas, values='valor_total', names='pagamento', title="Pagamentos", color_discrete_sequence=px.colors.qualitative.Pastel)
+            st.plotly_chart(fig, use_container_width=True)
+        with col2:
+            df_prod = df.groupby("produto")["quantidade"].sum().reset_index()
+            fig2 = px.bar(df_prod, x="quantidade", y="produto", orientation='h', title="Top Produtos", color_discrete_sequence=['#8D6E63'])
+            st.plotly_chart(fig2, use_container_width=True)
     else:
-        st.info("Nenhuma venda registrada.")
+        st.info("Aguardando primeiras vendas...")
 
 # =================================================================================
 # PÁGINA: NOVA ENCOMENDA
 # =================================================================================
 elif pagina == "🛒 Nova Encomenda":
-    st.header("🛒 Registrar Pedido / Encomenda")
+    st.header("🛒 Registrar Novo Pedido")
     if 'carrinho' not in st.session_state: st.session_state['carrinho'] = []
 
     conn = conectar()
-    clientes = pd.read_sql_query("SELECT id, nome FROM Clientes", conn)
-    produtos = pd.read_sql_query("SELECT id, nome, preco FROM Produtos", conn)
+    clientes = carregar_dados("Clientes")
+    produtos = carregar_dados("Produtos")
     conn.close()
 
     if clientes.empty or produtos.empty:
         st.warning("Cadastre clientes e produtos primeiro.")
     else:
-        # 1. Dados do Cliente e Entrega
         c1, c2 = st.columns([2, 1])
         with c1:
             cli_map = dict(zip(clientes['nome'], clientes['id']))
             nome_c = st.selectbox("Cliente:", list(cli_map.keys()))
         with c2:
-            data_entrega = st.date_input("📅 Data da Entrega/Retirada", min_value=date.today())
+            data_ent = st.date_input("📅 Data da Entrega", min_value=date.today())
 
-        obs = st.text_area("📝 Observações do Bolo (Ex: Escrever 'Parabéns', Recheio Extra, etc):")
-        
+        obs = st.text_area("📝 Observações (Detalhes do bolo):")
         st.divider()
         
-        # 2. Produtos
         prod_map = {f"{r['nome']} (R$ {r['preco']:.2f})": r for i, r in produtos.iterrows()}
-        c1, c2, c3 = st.columns([3,1,1])
-        with c1: 
-            p_sel = st.selectbox("Produto:", list(prod_map.keys()))
-            dados_p = prod_map[p_sel]
-        with c2: qtd = st.number_input("Qtd", 1, 50, 1)
-        with c3:
-            st.write(""); st.write("")
-            if st.button("➕ Add"):
-                st.session_state['carrinho'].append({"id": dados_p['id'], "nome": dados_p['nome'], "preco": dados_p['preco'], "qtd": qtd, "total": dados_p['preco']*qtd})
+        c_p, c_q, c_b = st.columns([3, 1, 1])
+        with c_p: p_sel = st.selectbox("Produto:", list(prod_map.keys())); dados_p = prod_map[p_sel]
+        with c_q: qtd = st.number_input("Qtd", 1, 50, 1)
+        with c_b: 
+            st.write("")
+            st.write("")
+            if st.button("➕ Add"): st.session_state['carrinho'].append({"id": dados_p['id'], "nome": dados_p['nome'], "preco": dados_p['preco'], "qtd": qtd, "total": dados_p['preco']*qtd})
 
-        # 3. Fechamento
         if st.session_state['carrinho']:
             df_c = pd.DataFrame(st.session_state['carrinho'])
-            st.dataframe(df_c[['nome', 'qtd', 'preco', 'total']], hide_index=True, use_container_width=True)
+            st.table(df_c[['nome', 'qtd', 'total']])
             total = df_c['total'].sum()
-            st.write(f"### Total: R$ {total:.2f}")
+            pag = st.radio("Pagamento:", ["Pix", "Dinheiro", "Cartão"], horizontal=True)
             
-            pagamento = st.radio("Pagamento:", ["Pix", "Dinheiro", "Cartão de Crédito", "Cartão de Débito"], horizontal=True)
-            
-            if st.button("✅ CONFIRMAR ENCOMENDA", type="primary"):
-                conn = conectar()
-                c = conn.cursor()
-                data_venda = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                data_entrega_str = data_entrega.strftime("%Y-%m-%d")
-                
-                c.execute("""
-                    INSERT INTO Pedidos (data_venda, data_entrega, id_cliente, valor_total, pagamento, observacoes) 
-                    VALUES (?,?,?,?,?,?)""", 
-                    (data_venda, data_entrega_str, cli_map[nome_c], total, pagamento, obs))
-                
+            if st.button("✅ SALVAR ENCOMENDA", type="primary"):
+                conn = conectar(); c = conn.cursor()
+                data_v = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                # Salva como 'Pendente' por padrão
+                c.execute("INSERT INTO Pedidos (data_venda, data_entrega, id_cliente, valor_total, pagamento, observacoes, status) VALUES (?,?,?,?,?,?,?)", 
+                          (data_v, data_ent.strftime("%Y-%m-%d"), cli_map[nome_c], total, pag, obs, 'Pendente'))
                 id_ped = c.lastrowid
                 for item in st.session_state['carrinho']:
-                    c.execute("INSERT INTO Pedidos_Itens (id_pedido, id_produto, valor_unitario, quantidade, total) VALUES (?,?,?,?,?)",
-                              (id_ped, item['id'], item['preco'], item['qtd'], item['total']))
+                    c.execute("INSERT INTO Pedidos_Itens (id_pedido, id_produto, valor_unitario, quantidade, total) VALUES (?,?,?,?,?)", (id_ped, item['id'], item['preco'], item['qtd'], item['total']))
                 conn.commit(); conn.close()
                 st.session_state['carrinho'] = []
-                st.balloons(); st.success("Encomenda Salva! Vá em Histórico para ver o comprovante."); st.rerun()
+                st.success("Pedido registrado!"); st.balloons(); st.rerun()
 
 # =================================================================================
-# PÁGINA: HISTÓRICO COM GERADOR DE COMPROVANTE
+# PÁGINA: PRODUÇÃO & HISTÓRICO (DIFERENCIAL!)
 # =================================================================================
-elif pagina == "📂 Histórico & Comprovante":
-    st.header("📂 Histórico & Comprovantes")
+elif pagina == "👨‍🍳 Produção & Histórico":
+    st.header("👨‍🍳 Gestão de Produção e Pedidos")
     
     conn = conectar()
-    df_header = pd.read_sql_query("""
+    df = pd.read_sql_query("""
         SELECT Pedidos.id, Pedidos.data_entrega, Clientes.nome as Cliente, 
-               Pedidos.valor_total, Pedidos.pagamento, Pedidos.observacoes
+               Pedidos.valor_total, Pedidos.status, Pedidos.observacoes
         FROM Pedidos 
         JOIN Clientes ON Pedidos.id_cliente = Clientes.id
-        ORDER BY Pedidos.id DESC
+        ORDER BY Pedidos.data_entrega ASC
     """, conn)
     conn.close()
 
-    if not df_header.empty:
-        # Formata data para BR
-        df_header['data_entrega'] = pd.to_datetime(df_header['data_entrega']).dt.strftime('%d/%m/%Y')
-        
-        lista_pedidos = df_header.apply(lambda x: f"Pedido #{x['id']} - {x['Cliente']} (Entrega: {x['data_entrega']})", axis=1)
-        pedido_selecionado = st.selectbox("🔎 Selecione uma encomenda para ver detalhes e comprovante:", lista_pedidos)
-        
-        id_selecionado = pedido_selecionado.split("#")[1].split(" -")[0]
-        dados_pedido = df_header[df_header['id'] == int(id_selecionado)].iloc[0]
-        
-        conn = conectar()
-        itens_pedido = pd.read_sql_query(f"""
-            SELECT Produtos.nome, Pedidos_Itens.quantidade, Pedidos_Itens.total 
-            FROM Pedidos_Itens 
-            JOIN Produtos ON Pedidos_Itens.id_produto = Produtos.id 
-            WHERE id_pedido = {id_selecionado}
-        """, conn)
-        conn.close()
+    if not df.empty:
+        # Filtro de Status para ajudar a focar
+        status_filtro = st.multiselect("Filtrar por Status:", ["Pendente", "Em Produção", "Pronto", "Finalizado"], default=["Pendente", "Em Produção", "Pronto"])
+        df_filtrado = df[df['status'].isin(status_filtro)]
+
+        st.dataframe(df_filtrado, use_container_width=True, hide_index=True)
 
         st.divider()
+        st.subheader("⚡ Atualizar Status ou Gerar Comprovante")
+        
+        sel_list = df.apply(lambda x: f"Pedido #{x['id']} - {x['Cliente']} ({x['status']})", axis=1)
+        pedido_sel = st.selectbox("Selecione um pedido para agir:", sel_list)
+        id_sel = pedido_sel.split("#")[1].split(" -")[0]
 
-        col_esq, col_dir = st.columns([1, 1])
-        with col_esq:
-            st.subheader("📄 Comprovante para WhatsApp")
-            texto_zap = f"*🎂 PEDIDO #{dados_pedido['id']}* - Nossa Que Bolo!\n"
-            texto_zap += f"👤 *Cliente:* {dados_pedido['Cliente']}\n"
-            texto_zap += f"📅 *Entrega:* {dados_pedido['data_entrega']}\n\n"
-            texto_zap += "*🍰 ITENS:*\n"
-            for index, row in itens_pedido.iterrows():
-                texto_zap += f"{row['quantidade']}x {row['nome']} (R$ {row['total']:.2f})\n"
-            texto_zap += f"\n📝 *Obs:* {dados_pedido['observacoes']}\n"
-            texto_zap += f"💰 *TOTAL:* R$ {dados_pedido['valor_total']:.2f}\n"
-            texto_zap += f"💳 *Pagamento:* {dados_pedido['pagamento']}\n"
-            texto_zap += "--------------------------------"
-            st.code(texto_zap, language='markdown')
-            st.caption("👆 Clique no ícone de copiar acima e cole no WhatsApp!")
-
-        with col_dir:
-            st.subheader("⚙️ Ações")
-            st.write(f"**Status:** Pedido Ativo")
-            st.write(f"**Valor:** R$ {dados_pedido['valor_total']:.2f}")
-            st.write("")
-            st.write("")
-            if st.button("🗑️ Excluir/Cancelar este Pedido", type="secondary"):
-                conn = conectar()
-                c = conn.cursor()
-                c.execute("DELETE FROM Pedidos_Itens WHERE id_pedido = ?", (id_selecionado,))
-                c.execute("DELETE FROM Pedidos WHERE id = ?", (id_selecionado,))
-                conn.commit()
-                conn.close()
-                st.error("Pedido cancelado!")
-                st.rerun()
+        col1, col2 = st.columns(2)
+        with col1:
+            novo_status = st.selectbox("Mudar status para:", ["Pendente", "Em Produção", "Pronto", "Finalizado"])
+            if st.button("🔄 Atualizar Status"):
+                conn = conectar(); c = conn.cursor()
+                c.execute("UPDATE Pedidos SET status = ? WHERE id = ?", (novo_status, id_sel))
+                conn.commit(); conn.close()
+                st.success(f"Pedido #{id_sel} agora está {novo_status}!"); st.rerun()
+        
+        with col2:
+            if st.button("📄 Gerar Comprovante WhatsApp"):
+                # Busca detalhes para o comprovante
+                dados = df[df['id'] == int(id_sel)].iloc[0]
+                texto = f"*🎂 PEDIDO #{id_sel}*\n*Cliente:* {dados['Cliente']}\n*Entrega:* {dados['data_entrega']}\n*Status:* {dados['status']}\n*Obs:* {dados['observacoes']}\n*Total:* R$ {dados['valor_total']:.2f}"
+                st.code(texto)
 
     else:
-        st.info("Nenhuma encomenda registrada ainda.")
+        st.info("Nenhum pedido para produzir.")
 
 # =================================================================================
 # PÁGINAS DE CADASTRO
 # =================================================================================
 elif pagina == "👥 Clientes":
-    st.header("Clientes")
-    tab1, tab2 = st.tabs(["Novo", "Excluir"])
-    with tab1:
-        with st.form("f_cli"):
-            n = st.text_input("Nome"); t = st.text_input("Tel"); e = st.text_input("End")
-            if st.form_submit_button("Salvar") and n:
-                c = conectar(); c.execute("INSERT INTO Clientes (nome, telefone, endereco) VALUES (?,?,?)", (n,t,e)); c.commit(); c.close(); st.rerun()
-    with tab2:
-        df = carregar_dados("Clientes")
-        if not df.empty:
-            d = st.selectbox("Excluir:", df['nome'])
-            if st.button("Apagar"):
-                c = conectar(); c.execute("DELETE FROM Clientes WHERE nome=?", (d,)); c.commit(); c.close(); st.rerun()
+    st.header("Gerenciar Clientes")
+    with st.form("cli"):
+        n = st.text_input("Nome"); t = st.text_input("WhatsApp"); e = st.text_input("Endereço")
+        if st.form_submit_button("Cadastrar"):
+            conn = conectar(); c = conn.cursor(); c.execute("INSERT INTO Clientes (nome, telefone, endereco) VALUES (?,?,?)", (n,t,e)); conn.commit(); conn.close(); st.rerun()
     st.dataframe(carregar_dados("Clientes"), use_container_width=True)
 
 elif pagina == "🍰 Cardápio":
-    st.header("Cardápio")
-    tab1, tab2 = st.tabs(["Novo", "Excluir"])
-    with tab1:
-        with st.form("f_prod"):
-            n = st.text_input("Nome"); p = st.number_input("Preço", 0.0); t = st.text_input("Tam")
-            if st.form_submit_button("Salvar") and n:
-                c = conectar(); c.execute("INSERT INTO Produtos (nome, preco, tamanho) VALUES (?,?,?)", (n,p,t)); c.commit(); c.close(); st.rerun()
-    with tab2:
-        df = carregar_dados("Produtos")
-        if not df.empty:
-            d = st.selectbox("Excluir:", df['nome'])
-            if st.button("Apagar"):
-                c = conectar(); c.execute("DELETE FROM Produtos WHERE nome=?", (d,)); c.commit(); c.close(); st.rerun()
+    st.header("Gerenciar Cardápio")
+    with st.form("prod"):
+        n = st.text_input("Bolo/Doce"); p = st.number_input("Preço", 0.0); t = st.text_input("Tamanho/Peso")
+        if st.form_submit_button("Cadastrar"):
+            conn = conectar(); c = conn.cursor(); c.execute("INSERT INTO Produtos (nome, preco, tamanho) VALUES (?,?,?)", (n,p,t)); conn.commit(); conn.close(); st.rerun()
     st.dataframe(carregar_dados("Produtos"), use_container_width=True)
