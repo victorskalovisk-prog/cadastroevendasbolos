@@ -44,8 +44,7 @@ if pagina == "📊 Dashboard":
     filtro_periodo = st.sidebar.selectbox("Período:", ["Todo o Histórico", "Últimos 7 dias", "Hoje"])
 else:
     filtro_periodo = "Todo o Histórico"
-    st.sidebar.image("logo.png", use_container_width=True)
-    st.sidebar.write("🎂 **Nossa Que Bolo!**") # Caso a imagem não seja encontrada
+
 
 
 # =================================================================================
