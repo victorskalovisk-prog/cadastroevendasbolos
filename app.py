@@ -37,6 +37,7 @@ def carregar_dados(tabela):
 # --- BARRA LATERAL ---
 st.sidebar.title("🎂 Gestão Completa")
 pagina = st.sidebar.radio("Navegação:", ["📊 Dashboard", "🛒 Nova Encomenda", "📂 Histórico & Comprovante", "👥 Clientes", "🍰 Cardápio"])
+st.sidebar.image("logo.png", use_container_width=True)
 
 st.sidebar.markdown("---")
 if pagina == "📊 Dashboard":
