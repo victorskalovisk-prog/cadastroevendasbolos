@@ -10,7 +10,7 @@ st.set_page_config(page_title="Nossa Que Bolo! 🎂", page_icon="🎂", layout="
 
 # --- CONEXÃO COM O BANCO LOCAL ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# Mantivemos o v2 para você não perder os dados que já lançou
+# Mantemos o V2 para não perder seus dados
 DB_PATH = os.path.join(BASE_DIR, "sistema_bolos_v2.db")
 
 def conectar():
@@ -55,11 +55,13 @@ if pagina == "📊 Dashboard":
     sql = """
     SELECT 
         Pedidos.id as id_pedido,
-        Pedidos.data_venda as data,
+        Pedidos.data_venda as data_venda,
+        Pedidos.data_entrega as data_entrega,
         Pedidos.valor_total,
         Pedidos.pagamento,
         Pedidos_Itens.quantidade,
-        Produtos.nome as produto
+        Produtos.nome as produto,
+        Pedidos.observacoes
     FROM Pedidos_Itens
     JOIN Pedidos ON Pedidos_Itens.id_pedido = Pedidos.id
     JOIN Produtos ON Pedidos_Itens.id_produto = Produtos.id
@@ -69,13 +71,13 @@ if pagina == "📊 Dashboard":
     conn.close()
 
     if not df.empty:
-        df['data'] = pd.to_datetime(df['data'])
-        df['dia'] = df['data'].dt.date  
+        df['data_venda'] = pd.to_datetime(df['data_venda'])
+        df['dia'] = df['data_venda'].dt.date  
         data_atual = datetime.now()
 
         if filtro_periodo == "Últimos 7 dias":
             data_corte = data_atual - timedelta(days=7)
-            df = df[df['data'] >= data_corte]
+            df = df[df['data_venda'] >= data_corte]
         elif filtro_periodo == "Hoje":
             df = df[df['dia'] == data_atual.date()]
 
@@ -102,9 +104,19 @@ if pagina == "📊 Dashboard":
                 fig2 = px.bar(df.groupby("produto")["quantidade"].sum().reset_index().sort_values("quantidade"), x="quantidade", y="produto", orientation='h', color_discrete_sequence=['#8D6E63'])
                 st.plotly_chart(fig2, use_container_width=True)
             
-            # Botão Download
-            csv = df.to_csv(index=False).encode('utf-8')
-            st.download_button("📥 Baixar Excel", csv, "vendas.csv", "text/csv")
+            # --- BOTÃO DE DOWNLOAD MELHORADO 🇧🇷 ---
+            st.divider()
+            st.subheader("📂 Exportar Dados")
+            
+            # Aqui está o segredo: sep=';' e decimal=',' para o Excel Brasileiro entender
+            csv = df.to_csv(index=False, sep=';', decimal=',').encode('utf-8-sig')
+            
+            st.download_button(
+                label="📥 Baixar Planilha (Excel BR)", 
+                data=csv, 
+                file_name=f"relatorio_vendas_{date.today()}.csv", 
+                mime="text/csv"
+            )
 
     else:
         st.info("Nenhuma venda registrada.")
@@ -132,7 +144,6 @@ elif pagina == "🛒 Nova Encomenda":
         with c2:
             data_entrega = st.date_input("📅 Data da Entrega/Retirada", min_value=date.today())
 
-        # Campo de Observações
         obs = st.text_area("📝 Observações do Bolo (Ex: Escrever 'Parabéns', Recheio Extra, etc):")
         
         st.divider()
@@ -178,7 +189,7 @@ elif pagina == "🛒 Nova Encomenda":
                 st.balloons(); st.success("Encomenda Salva! Vá em Histórico para ver o comprovante."); st.rerun()
 
 # =================================================================================
-# PÁGINA: HISTÓRICO COM GERADOR DE COMPROVANTE (NOVO!)
+# PÁGINA: HISTÓRICO COM GERADOR DE COMPROVANTE
 # =================================================================================
 elif pagina == "📂 Histórico & Comprovante":
     st.header("📂 Histórico & Comprovantes")
@@ -194,17 +205,15 @@ elif pagina == "📂 Histórico & Comprovante":
     conn.close()
 
     if not df_header.empty:
-        # 1. Seletor de Pedido
+        # Formata data para BR
+        df_header['data_entrega'] = pd.to_datetime(df_header['data_entrega']).dt.strftime('%d/%m/%Y')
+        
         lista_pedidos = df_header.apply(lambda x: f"Pedido #{x['id']} - {x['Cliente']} (Entrega: {x['data_entrega']})", axis=1)
         pedido_selecionado = st.selectbox("🔎 Selecione uma encomenda para ver detalhes e comprovante:", lista_pedidos)
         
-        # Pega o ID do texto selecionado
         id_selecionado = pedido_selecionado.split("#")[1].split(" -")[0]
-        
-        # Filtra os dados desse pedido específico
         dados_pedido = df_header[df_header['id'] == int(id_selecionado)].iloc[0]
         
-        # Busca os itens desse pedido
         conn = conectar()
         itens_pedido = pd.read_sql_query(f"""
             SELECT Produtos.nome, Pedidos_Itens.quantidade, Pedidos_Itens.total 
@@ -216,26 +225,19 @@ elif pagina == "📂 Histórico & Comprovante":
 
         st.divider()
 
-        # Colunas: Esquerda (Comprovante), Direita (Ações)
         col_esq, col_dir = st.columns([1, 1])
-        
         with col_esq:
             st.subheader("📄 Comprovante para WhatsApp")
-            # Montando o texto formatado
             texto_zap = f"*🎂 PEDIDO #{dados_pedido['id']}* - Nossa Que Bolo!\n"
             texto_zap += f"👤 *Cliente:* {dados_pedido['Cliente']}\n"
             texto_zap += f"📅 *Entrega:* {dados_pedido['data_entrega']}\n\n"
             texto_zap += "*🍰 ITENS:*\n"
-            
             for index, row in itens_pedido.iterrows():
                 texto_zap += f"{row['quantidade']}x {row['nome']} (R$ {row['total']:.2f})\n"
-            
             texto_zap += f"\n📝 *Obs:* {dados_pedido['observacoes']}\n"
             texto_zap += f"💰 *TOTAL:* R$ {dados_pedido['valor_total']:.2f}\n"
             texto_zap += f"💳 *Pagamento:* {dados_pedido['pagamento']}\n"
             texto_zap += "--------------------------------"
-
-            # Mostra o texto em uma caixa de código (fácil de copiar)
             st.code(texto_zap, language='markdown')
             st.caption("👆 Clique no ícone de copiar acima e cole no WhatsApp!")
 
@@ -243,7 +245,6 @@ elif pagina == "📂 Histórico & Comprovante":
             st.subheader("⚙️ Ações")
             st.write(f"**Status:** Pedido Ativo")
             st.write(f"**Valor:** R$ {dados_pedido['valor_total']:.2f}")
-            
             st.write("")
             st.write("")
             if st.button("🗑️ Excluir/Cancelar este Pedido", type="secondary"):
