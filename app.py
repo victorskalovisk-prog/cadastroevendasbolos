@@ -10,6 +10,7 @@ st.set_page_config(page_title="Nossa Que Bolo! 🎂", page_icon="🎂", layout="
 
 # --- CONEXÃO COM O BANCO LOCAL ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Mantivemos o v2 para você não perder os dados que já lançou
 DB_PATH = os.path.join(BASE_DIR, "sistema_bolos_v2.db")
 
 def conectar():
@@ -20,7 +21,6 @@ def criar_tabelas():
     c = conn.cursor()
     c.execute("""CREATE TABLE IF NOT EXISTS Clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT, telefone TEXT, endereco TEXT)""")
     c.execute("""CREATE TABLE IF NOT EXISTS Produtos (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT, preco REAL, tamanho TEXT)""")
-    # ADICIONEI: data_entrega e observacoes
     c.execute("""CREATE TABLE IF NOT EXISTS Pedidos (id INTEGER PRIMARY KEY AUTOINCREMENT, data_venda TEXT, data_entrega TEXT, id_cliente INTEGER, valor_total REAL, pagamento TEXT, observacoes TEXT)""")
     c.execute("""CREATE TABLE IF NOT EXISTS Pedidos_Itens (id INTEGER PRIMARY KEY AUTOINCREMENT, id_pedido INTEGER, id_produto INTEGER, valor_unitario REAL, quantidade INTEGER, total REAL)""")
     conn.commit()
@@ -36,7 +36,7 @@ def carregar_dados(tabela):
 
 # --- BARRA LATERAL ---
 st.sidebar.title("🎂 Gestão Completa")
-pagina = st.sidebar.radio("Navegação:", ["📊 Dashboard", "🛒 Nova Encomenda", "📂 Histórico & Produção", "👥 Clientes", "🍰 Cardápio"])
+pagina = st.sidebar.radio("Navegação:", ["📊 Dashboard", "🛒 Nova Encomenda", "📂 Histórico & Comprovante", "👥 Clientes", "🍰 Cardápio"])
 
 st.sidebar.markdown("---")
 if pagina == "📊 Dashboard":
@@ -110,7 +110,7 @@ if pagina == "📊 Dashboard":
         st.info("Nenhuma venda registrada.")
 
 # =================================================================================
-# PÁGINA: NOVA ENCOMENDA (COM DATA E OBS)
+# PÁGINA: NOVA ENCOMENDA
 # =================================================================================
 elif pagina == "🛒 Nova Encomenda":
     st.header("🛒 Registrar Pedido / Encomenda")
@@ -132,7 +132,7 @@ elif pagina == "🛒 Nova Encomenda":
         with c2:
             data_entrega = st.date_input("📅 Data da Entrega/Retirada", min_value=date.today())
 
-        # Campo de Observações (NOVO)
+        # Campo de Observações
         obs = st.text_area("📝 Observações do Bolo (Ex: Escrever 'Parabéns', Recheio Extra, etc):")
         
         st.divider()
@@ -162,7 +162,6 @@ elif pagina == "🛒 Nova Encomenda":
                 conn = conectar()
                 c = conn.cursor()
                 data_venda = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                # Convertendo data de entrega para string
                 data_entrega_str = data_entrega.strftime("%Y-%m-%d")
                 
                 c.execute("""
@@ -176,44 +175,92 @@ elif pagina == "🛒 Nova Encomenda":
                               (id_ped, item['id'], item['preco'], item['qtd'], item['total']))
                 conn.commit(); conn.close()
                 st.session_state['carrinho'] = []
-                st.balloons(); st.success("Encomenda Agendada!"); st.rerun()
+                st.balloons(); st.success("Encomenda Salva! Vá em Histórico para ver o comprovante."); st.rerun()
 
 # =================================================================================
-# PÁGINA: HISTÓRICO (COM DETALHES DE ENTREGA)
+# PÁGINA: HISTÓRICO COM GERADOR DE COMPROVANTE (NOVO!)
 # =================================================================================
-elif pagina == "📂 Histórico & Produção":
-    st.header("📂 Histórico de Pedidos")
+elif pagina == "📂 Histórico & Comprovante":
+    st.header("📂 Histórico & Comprovantes")
     
     conn = conectar()
-    df = pd.read_sql_query("""
-        SELECT id, data_entrega as 'Para Entregar Em', observacoes as 'Detalhes', valor_total, pagamento 
-        FROM Pedidos ORDER BY data_entrega DESC
+    df_header = pd.read_sql_query("""
+        SELECT Pedidos.id, Pedidos.data_entrega, Clientes.nome as Cliente, 
+               Pedidos.valor_total, Pedidos.pagamento, Pedidos.observacoes
+        FROM Pedidos 
+        JOIN Clientes ON Pedidos.id_cliente = Clientes.id
+        ORDER BY Pedidos.id DESC
     """, conn)
     conn.close()
 
-    if not df.empty:
-        # Formata a data para ficar bonitinha (Dia/Mês/Ano)
-        df['Para Entregar Em'] = pd.to_datetime(df['Para Entregar Em']).dt.strftime('%d/%m/%Y')
+    if not df_header.empty:
+        # 1. Seletor de Pedido
+        lista_pedidos = df_header.apply(lambda x: f"Pedido #{x['id']} - {x['Cliente']} (Entrega: {x['data_entrega']})", axis=1)
+        pedido_selecionado = st.selectbox("🔎 Selecione uma encomenda para ver detalhes e comprovante:", lista_pedidos)
         
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        # Pega o ID do texto selecionado
+        id_selecionado = pedido_selecionado.split("#")[1].split(" -")[0]
         
+        # Filtra os dados desse pedido específico
+        dados_pedido = df_header[df_header['id'] == int(id_selecionado)].iloc[0]
+        
+        # Busca os itens desse pedido
+        conn = conectar()
+        itens_pedido = pd.read_sql_query(f"""
+            SELECT Produtos.nome, Pedidos_Itens.quantidade, Pedidos_Itens.total 
+            FROM Pedidos_Itens 
+            JOIN Produtos ON Pedidos_Itens.id_produto = Produtos.id 
+            WHERE id_pedido = {id_selecionado}
+        """, conn)
+        conn.close()
+
         st.divider()
-        st.subheader("🗑️ Cancelar Pedido")
-        # Lógica de exclusão mantida
-        lista = df.apply(lambda x: f"Pedido #{x['id']} - Entrega: {x['Para Entregar Em']} (R$ {x['valor_total']:.2f})", axis=1)
-        sel = st.selectbox("Selecione:", lista)
-        if st.button("Excluir Pedido"):
-            id_del = sel.split("#")[1].split(" -")[0]
-            conn = conectar(); c = conn.cursor()
-            c.execute("DELETE FROM Pedidos_Itens WHERE id_pedido = ?", (id_del,))
-            c.execute("DELETE FROM Pedidos WHERE id = ?", (id_del,))
-            conn.commit(); conn.close()
-            st.success("Cancelado!"); st.rerun()
+
+        # Colunas: Esquerda (Comprovante), Direita (Ações)
+        col_esq, col_dir = st.columns([1, 1])
+        
+        with col_esq:
+            st.subheader("📄 Comprovante para WhatsApp")
+            # Montando o texto formatado
+            texto_zap = f"*🎂 PEDIDO #{dados_pedido['id']}* - Nossa Que Bolo!\n"
+            texto_zap += f"👤 *Cliente:* {dados_pedido['Cliente']}\n"
+            texto_zap += f"📅 *Entrega:* {dados_pedido['data_entrega']}\n\n"
+            texto_zap += "*🍰 ITENS:*\n"
+            
+            for index, row in itens_pedido.iterrows():
+                texto_zap += f"{row['quantidade']}x {row['nome']} (R$ {row['total']:.2f})\n"
+            
+            texto_zap += f"\n📝 *Obs:* {dados_pedido['observacoes']}\n"
+            texto_zap += f"💰 *TOTAL:* R$ {dados_pedido['valor_total']:.2f}\n"
+            texto_zap += f"💳 *Pagamento:* {dados_pedido['pagamento']}\n"
+            texto_zap += "--------------------------------"
+
+            # Mostra o texto em uma caixa de código (fácil de copiar)
+            st.code(texto_zap, language='markdown')
+            st.caption("👆 Clique no ícone de copiar acima e cole no WhatsApp!")
+
+        with col_dir:
+            st.subheader("⚙️ Ações")
+            st.write(f"**Status:** Pedido Ativo")
+            st.write(f"**Valor:** R$ {dados_pedido['valor_total']:.2f}")
+            
+            st.write("")
+            st.write("")
+            if st.button("🗑️ Excluir/Cancelar este Pedido", type="secondary"):
+                conn = conectar()
+                c = conn.cursor()
+                c.execute("DELETE FROM Pedidos_Itens WHERE id_pedido = ?", (id_selecionado,))
+                c.execute("DELETE FROM Pedidos WHERE id = ?", (id_selecionado,))
+                conn.commit()
+                conn.close()
+                st.error("Pedido cancelado!")
+                st.rerun()
+
     else:
-        st.info("Sem pedidos.")
+        st.info("Nenhuma encomenda registrada ainda.")
 
 # =================================================================================
-# PÁGINAS DE CADASTRO (MANTIDAS)
+# PÁGINAS DE CADASTRO
 # =================================================================================
 elif pagina == "👥 Clientes":
     st.header("Clientes")
