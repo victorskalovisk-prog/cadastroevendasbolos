@@ -20,15 +20,8 @@ def criar_tabelas():
     c = conn.cursor()
     c.execute("""CREATE TABLE IF NOT EXISTS Clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT, telefone TEXT, endereco TEXT)""")
     c.execute("""CREATE TABLE IF NOT EXISTS Produtos (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT, preco REAL, tamanho TEXT)""")
-    c.execute("""CREATE TABLE IF NOT EXISTS Pedidos (id INTEGER PRIMARY KEY AUTOINCREMENT, data_venda TEXT, data_entrega TEXT, id_cliente INTEGER, valor_total REAL, pagamento TEXT, observacoes TEXT)""")
+    c.execute("""CREATE TABLE IF NOT EXISTS Pedidos (id INTEGER PRIMARY KEY AUTOINCREMENT, data_venda TEXT, data_entrega TEXT, id_cliente INTEGER, valor_total REAL, pagamento TEXT, observacoes TEXT, status TEXT DEFAULT 'Pendente')""")
     c.execute("""CREATE TABLE IF NOT EXISTS Pedidos_Itens (id INTEGER PRIMARY KEY AUTOINCREMENT, id_pedido INTEGER, id_produto INTEGER, valor_unitario REAL, quantidade INTEGER, total REAL)""")
-    
-    # Tenta adicionar a coluna STATUS caso ela não exista (para não dar erro no v2)
-    try:
-        c.execute("ALTER TABLE Pedidos ADD COLUMN status TEXT DEFAULT 'Pendente'")
-    except:
-        pass
-        
     conn.commit()
     conn.close()
 
@@ -46,10 +39,10 @@ try:
 except:
     st.sidebar.markdown("# 🎂 Nossa Que Bolo!")
 
-pagina = st.sidebar.radio("Navegação:", ["📊 Dashboard", "🛒 Nova Encomenda", "👨‍🍳 Produção & Histórico", "👥 Clientes", "🍰 Cardápio"])
+pagina = st.sidebar.radio("Navegação:", ["📊 Dashboard", "🛒 Nova Encomenda", "👨‍🍳 Produção & Histórico", "🏆 Ranking de Clientes", "👥 Clientes", "🍰 Cardápio"])
 
 # =================================================================================
-# PÁGINA: DASHBOARD
+# PÁGINA: DASHBOARD (MANTIDA)
 # =================================================================================
 if pagina == "📊 Dashboard":
     st.header("📊 Painel de Controle")
@@ -75,6 +68,61 @@ if pagina == "📊 Dashboard":
             st.plotly_chart(fig2, use_container_width=True)
     else:
         st.info("Aguardando primeiras vendas...")
+
+# =================================================================================
+# PÁGINA: RANKING DE CLIENTES VIP (NOVIDADE!)
+# =================================================================================
+elif pagina == "🏆 Ranking de Clientes":
+    st.header("🏆 Seus Clientes Mais Fiéis")
+    
+    conn = conectar()
+    # Busca pedidos cruzando com nome dos clientes
+    query = """
+    SELECT Clientes.nome as Cliente, Pedidos.valor_total
+    FROM Pedidos
+    JOIN Clientes ON Pedidos.id_cliente = Clientes.id
+    """
+    df_vip = pd.read_sql_query(query, conn)
+    conn.close()
+
+    if not df_vip.empty:
+        # Agrupamento por cliente
+        ranking = df_vip.groupby("Cliente").agg(
+            Total_Gasto=('valor_total', 'sum'),
+            Qtd_Pedidos=('valor_total', 'count')
+        ).reset_index()
+        
+        ranking['Ticket_Medio'] = ranking['Total_Gasto'] / ranking['Qtd_Pedidos']
+        ranking = ranking.sort_values(by="Total_Gasto", ascending=False)
+
+        # KPIs dos VIPs
+        top_cliente = ranking.iloc[0]['Cliente']
+        gasto_top = ranking.iloc[0]['Total_Gasto']
+
+        c1, c2 = st.columns(2)
+        c1.success(f"🥇 **Cliente Ouro:** {top_cliente}")
+        c2.info(f"💰 **Total Gasto por ele:** R$ {gasto_top:.2f}")
+
+        st.divider()
+        
+        col_graf, col_tab = st.columns([3, 2])
+        
+        with col_graf:
+            st.subheader("Gráfico de Clientes Ouro")
+            fig_vip = px.bar(ranking.head(10), x="Total_Gasto", y="Cliente", orientation='h', 
+                             text="Total_Gasto", color="Total_Gasto",
+                             color_continuous_scale='RdBu', title="Top 10 Clientes (R$)")
+            st.plotly_chart(fig_vip, use_container_width=True)
+            
+        with col_tab:
+            st.subheader("Dados Detalhados")
+            # Formatação para exibir na tabela
+            st.dataframe(ranking.style.format({"Total_Gasto": "R$ {:.2f}", "Ticket_Medio": "R$ {:.2f}"}), 
+                         hide_index=True, use_container_width=True)
+            
+        st.info("💡 **Dica de Gestão:** Clientes que aparecem aqui são ótimos candidatos para receberem brindes ou promoções exclusivas no WhatsApp!")
+    else:
+        st.warning("Ainda não há dados de vendas suficientes para gerar o ranking.")
 
 # =================================================================================
 # PÁGINA: NOVA ENCOMENDA
@@ -106,8 +154,7 @@ elif pagina == "🛒 Nova Encomenda":
         with c_p: p_sel = st.selectbox("Produto:", list(prod_map.keys())); dados_p = prod_map[p_sel]
         with c_q: qtd = st.number_input("Qtd", 1, 50, 1)
         with c_b: 
-            st.write("")
-            st.write("")
+            st.write(""); st.write("")
             if st.button("➕ Add"): st.session_state['carrinho'].append({"id": dados_p['id'], "nome": dados_p['nome'], "preco": dados_p['preco'], "qtd": qtd, "total": dados_p['preco']*qtd})
 
         if st.session_state['carrinho']:
@@ -119,7 +166,6 @@ elif pagina == "🛒 Nova Encomenda":
             if st.button("✅ SALVAR ENCOMENDA", type="primary"):
                 conn = conectar(); c = conn.cursor()
                 data_v = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                # Salva como 'Pendente' por padrão
                 c.execute("INSERT INTO Pedidos (data_venda, data_entrega, id_cliente, valor_total, pagamento, observacoes, status) VALUES (?,?,?,?,?,?,?)", 
                           (data_v, data_ent.strftime("%Y-%m-%d"), cli_map[nome_c], total, pag, obs, 'Pendente'))
                 id_ped = c.lastrowid
@@ -130,11 +176,10 @@ elif pagina == "🛒 Nova Encomenda":
                 st.success("Pedido registrado!"); st.balloons(); st.rerun()
 
 # =================================================================================
-# PÁGINA: PRODUÇÃO & HISTÓRICO (DIFERENCIAL!)
+# PÁGINA: PRODUÇÃO & HISTÓRICO
 # =================================================================================
 elif pagina == "👨‍🍳 Produção & Histórico":
     st.header("👨‍🍳 Gestão de Produção e Pedidos")
-    
     conn = conectar()
     df = pd.read_sql_query("""
         SELECT Pedidos.id, Pedidos.data_entrega, Clientes.nome as Cliente, 
@@ -146,40 +191,32 @@ elif pagina == "👨‍🍳 Produção & Histórico":
     conn.close()
 
     if not df.empty:
-        # Filtro de Status para ajudar a focar
         status_filtro = st.multiselect("Filtrar por Status:", ["Pendente", "Em Produção", "Pronto", "Finalizado"], default=["Pendente", "Em Produção", "Pronto"])
         df_filtrado = df[df['status'].isin(status_filtro)]
-
         st.dataframe(df_filtrado, use_container_width=True, hide_index=True)
-
         st.divider()
-        st.subheader("⚡ Atualizar Status ou Gerar Comprovante")
-        
         sel_list = df.apply(lambda x: f"Pedido #{x['id']} - {x['Cliente']} ({x['status']})", axis=1)
         pedido_sel = st.selectbox("Selecione um pedido para agir:", sel_list)
         id_sel = pedido_sel.split("#")[1].split(" -")[0]
 
-        col1, col2 = st.columns(2)
-        with col1:
+        c1, c2 = st.columns(2)
+        with c1:
             novo_status = st.selectbox("Mudar status para:", ["Pendente", "Em Produção", "Pronto", "Finalizado"])
             if st.button("🔄 Atualizar Status"):
                 conn = conectar(); c = conn.cursor()
                 c.execute("UPDATE Pedidos SET status = ? WHERE id = ?", (novo_status, id_sel))
                 conn.commit(); conn.close()
                 st.success(f"Pedido #{id_sel} agora está {novo_status}!"); st.rerun()
-        
-        with col2:
-            if st.button("📄 Gerar Comprovante WhatsApp"):
-                # Busca detalhes para o comprovante
+        with c2:
+            if st.button("📄 Gerar Comprovante"):
                 dados = df[df['id'] == int(id_sel)].iloc[0]
                 texto = f"*🎂 PEDIDO #{id_sel}*\n*Cliente:* {dados['Cliente']}\n*Entrega:* {dados['data_entrega']}\n*Status:* {dados['status']}\n*Obs:* {dados['observacoes']}\n*Total:* R$ {dados['valor_total']:.2f}"
                 st.code(texto)
-
     else:
-        st.info("Nenhum pedido para produzir.")
+        st.info("Nenhum pedido registrado.")
 
 # =================================================================================
-# PÁGINAS DE CADASTRO
+# CADASTROS
 # =================================================================================
 elif pagina == "👥 Clientes":
     st.header("Gerenciar Clientes")
