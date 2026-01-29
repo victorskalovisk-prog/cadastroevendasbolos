@@ -1,6 +1,6 @@
 [theme]
-primaryColor = "#D8436B"    # Um rosa framboesa elegante para os botões
-backgroundColor = "#FFFDF9" # Um creme bem clarinho (cor de farinha/leite)
-secondaryBackgroundColor = "#FCEADE" # Um tom pêssego/pastel para o menu lateral
-textColor = "#4A3B32"       # Um marrom café escuro para o texto (leitura fácil)
+primaryColor = "#8D6E63"    # Marrom Chocolate (Botões e destaques)
+backgroundColor = "#FFF9F5" # Creme Suave (Fundo da página)
+secondaryBackgroundColor = "#FCE4EC" # Rosa Pastel (Barra lateral)
+textColor = "#3E2723"       # Marrom Café Escuro (Textos)
 font = "sans serif"
